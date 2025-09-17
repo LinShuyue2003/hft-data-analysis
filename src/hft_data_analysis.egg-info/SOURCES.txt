@@ -1,0 +1,7 @@
+LICENSE
+README.md
+setup.py
+src/hft_data_analysis.egg-info/PKG-INFO
+src/hft_data_analysis.egg-info/SOURCES.txt
+src/hft_data_analysis.egg-info/dependency_links.txt
+src/hft_data_analysis.egg-info/top_level.txt
