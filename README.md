@@ -21,8 +21,6 @@ pip install -r requirements.txt
 # 3) Run end-to-end demo with bundled sample data
 python scripts/run_all.py --use-sample
 
-# 4) Generate an HTML report (figures + stats)
-python scripts/make_report.py --use-sample
 open reports/summary.html   # Windows: start reports\summary.html
 ```
 
@@ -54,10 +52,6 @@ hft-data-analysis/
 - Modeling **spread, volume, short-horizon returns** and volatility
 - Fitting **lognormal, normal, exponential, power-law**; model selection via **AIC/BIC**, sanity via **KS test**
 - Publishing a clean, documented, **open-source** analytics project
-
-> Resume bullets you can copy:
-> - *“对高频交易数据进行建模，发现短时间内价差波动规律并进行可视化。”*
-> - *“展示了对微观市场结构的定量分析能力。”*
 
 ---
 
@@ -129,18 +123,3 @@ python scripts/run_all.py --use-sample --fits-only
 This project is licensed under the MIT License. See `LICENSE` for details.
 
 ---
-
-## 🧭 GitHub Upload Guide
-
-1. Create a repository on GitHub, e.g., `hft-data-analysis` (MIT license).
-2. Locally:
-   ```bash
-   git init
-   git add .
-   git commit -m "HFT tick-level microstructure analysis: spread, volume, short-horizon volatility"
-   git branch -M main
-   git remote add origin <YOUR_REPO_URL>
-   git push -u origin main
-   ```
-3. In your README, keep the **figures** and **report** to showcase results (OK to commit small PNG/HTML).  
-4. Optionally add screenshots of your plots to the README for visual impact.
