@@ -1,75 +1,73 @@
+
+import os
+from datetime import datetime
+from typing import Dict, Any, List
+
+try:
+    from jinja2 import Environment, FileSystemLoader, select_autoescape
+    _HAS_JINJA2 = True
+except Exception:
+    _HAS_JINJA2 = False
+
 """
-Generate a simple HTML report with embedded figures and fit tables.
-"""
-from __future__ import annotations
-import json
-import pathlib
-from jinja2 import Template
-
-TEMPLATE = """
-<!doctype html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <title>HFT Microstructure Report</title>
-  <style>
-    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 24px; }
-    h1, h2 { margin: 0.4em 0; }
-    .fig { margin: 16px 0; }
-    table { border-collapse: collapse; margin: 12px 0; }
-    td, th { border: 1px solid #ddd; padding: 6px 10px; text-align: right; }
-    th { background: #fafafa; }
-    .caption { color: #666; font-size: 0.9em; }
-  </style>
-</head>
-<body>
-  <h1>HFT Microstructure Analysis</h1>
-  <p class="caption">Symbol: {{ symbol }} | Data window: {{ window }}</p>
-
-  <h2>Distributions & Fits</h2>
-  <div class="fig">
-    <img src="../results/figures/spread_hist.png" width="600">
-    <div class="caption">Bid–ask spread histogram</div>
-  </div>
-  <div class="fig">
-    <img src="../results/figures/volume_hist.png" width="600">
-    <div class="caption">Trade volume histogram</div>
-  </div>
-  <div class="fig">
-    <img src="../results/figures/returns_hist.png" width="600">
-    <div class="caption">Short-horizon returns histogram (mid-price)</div>
-  </div>
-
-  <h2>Roll Volatility</h2>
-  <div class="fig">
-    <img src="../results/figures/volatility_timeseries.png" width="800">
-    <div class="caption">Rolling volatility (e.g., on 1s bars)</div>
-  </div>
-
-  <h2>Fit Tables</h2>
-  <h3>Spread</h3>
-  {{ spread_table|safe }}
-  <h3>Volume</h3>
-  {{ volume_table|safe }}
-  <h3>Returns (abs)</h3>
-  {{ returns_table|safe }}
-
-</body>
-</html>
+HTML report builder. If Jinja2 is unavailable, falls back to a minimal template.
 """
 
-def render_table_html(df):
-    if df is None: return "<p>No data.</p>"
-    return df.to_html(index=False, float_format=lambda x: f"{x:.4g}")
+def build_report(output_html: str, context: Dict[str, Any], templates_dir: str = "templates") -> None:
+    """Render the report to HTML."""
+    os.makedirs(os.path.dirname(output_html) or ".", exist_ok=True)
+    if _HAS_JINJA2:
+        env = Environment(loader=FileSystemLoader(templates_dir), autoescape=select_autoescape())
+        tpl = env.get_template("report.html")
+        html = tpl.render(**context)
+    else:
+        rows_figs = []
+        for fig in context.get("figures", []):
+            rows_figs.append(f"""
+            <div class='card'>
+                <h3>{fig.get('title','')}</h3>
+                <img src="{fig.get('path','')}" style="max-width:100%"/>
+                <p class='caption'>{fig.get('caption','')}</p>
+            </div>
+            """.strip())
+        rows_tbls = []
+        for tb in context.get("stats_tables", []):
+            rows_tbls.append(f"""
+            <div class='card'>
+                <h3>{tb.get('name','')}</h3>
+                {tb.get('table','')}
+            </div>
+            """.strip())
+        notes_html = "".join([f"<li>{n}</li>" for n in context.get("notes", [])])
+        html = f"""
+        <html><head><meta charset='utf-8'><title>{context.get('title','HFT Report')}</title>
+        <style>
+        body {{ font-family: -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; margin: 24px; }}
+        .grid {{ display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 16px; }}
+        .card {{ border: 1px solid #eee; border-radius: 12px; padding: 12px; box-shadow: 0 1px 6px rgba(0,0,0,0.06);}}
+        table {{ border-collapse: collapse; width: 100%; }}
+        th, td {{ border: 1px solid #ddd; padding: 6px; text-align: right; }}
+        th {{ background:#fafafa; text-align: left; }}
+        </style></head><body>
+        <h1>{context.get('title','HFT Report')}</h1>
+        <div>Generated at {context.get('generated_at','')} · Symbol {context.get('symbol','')} · Bar {context.get('bar','')}</div>
+        <h2>Key Figures</h2>
+        <div class='grid'>{''.join(rows_figs)}</div>
+        <h2>Statistics</h2>
+        <div class='grid'>{''.join(rows_tbls)}</div>
+        <h2>Notes</h2><ul>{notes_html}</ul>
+        </body></html>"""
+    with open(output_html, "w", encoding="utf-8") as f:
+        f.write(html)
 
-def make_report(symbol: str, window: str, spread_fit_df, volume_fit_df, returns_fit_df, out_html: str):
-    tpl = Template(TEMPLATE)
-    html = tpl.render(
-        symbol=symbol,
-        window=window,
-        spread_table=render_table_html(spread_fit_df),
-        volume_table=render_table_html(volume_fit_df),
-        returns_table=render_table_html(returns_fit_df),
-    )
-    pathlib.Path(out_html).write_text(html, encoding="utf-8")
-    return out_html
+def default_context(title: str, symbol: str, bar: str) -> Dict[str, Any]:
+    """Create a default context shell."""
+    return {
+        "title": title,
+        "generated_at": datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC"),
+        "symbol": symbol,
+        "bar": bar,
+        "stats_tables": [],
+        "figures": [],
+        "notes": [],
+    }

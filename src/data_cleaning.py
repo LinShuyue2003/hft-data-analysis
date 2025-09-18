@@ -1,110 +1,104 @@
-"""
-Utilities for cleaning and normalizing tick-level data.
-Robust to Binance Data Vision formats (headerless, alt column names),
-and timestamps in seconds / milliseconds / microseconds.
-"""
-from __future__ import annotations
-import pandas as pd
 import numpy as np
+import pandas as pd
 
-def _detect_epoch_unit(max_val: float) -> str:
-    """
-    Infer epoch unit from magnitude.
-    ~1e9  -> seconds
-    ~1e12 -> milliseconds
-    ~1e15 -> microseconds
-    """
-    if max_val > 1e14:   # definitely microseconds
-        return "us"
-    if max_val > 1e12:   # definitely milliseconds
-        return "ms"
-    return "s"
+"""
+Utilities for cleaning trades and order book data.
+Handles headerless Binance aggTrades (a,p,q,f,l,T,m,M) and normalizes to ts/price/qty.
+"""
 
-def to_datetime(series, unit: str | None = None) -> pd.Series:
-    """
-    Robust timestamp parsing. Accepts ISO strings or epoch (s/ms/us).
-    """
-    s = series.copy()
-    # If already datetime-like, just coerce to UTC
-    if np.issubdtype(s.dtype, np.datetime64):
-        return pd.to_datetime(s, utc=True, errors="coerce")
-    # Numeric epoch
-    if np.issubdtype(s.dtype, np.number):
-        if unit is None:
-            unit = _detect_epoch_unit(float(np.nanmax(s)))
-        return pd.to_datetime(s, unit=unit, utc=True, errors="coerce")
-    # Strings -> let pandas parse
-    return pd.to_datetime(s, utc=True, errors="coerce")
+def to_datetime(s: pd.Series) -> pd.Series:
+    """Convert mixed timestamp inputs to timezone-naive pandas datetime64[ns] in UTC."""
+    if pd.api.types.is_datetime64_any_dtype(s):
+        s = pd.to_datetime(s, errors="coerce")
+        if hasattr(s.dtype, "tz") and s.dtype.tz is not None:
+            try:
+                s = s.dt.tz_convert("UTC").dt.tz_localize(None)
+            except Exception:
+                s = s.dt.tz_localize(None)
+        return s
+    if pd.api.types.is_integer_dtype(s) or pd.api.types.is_float_dtype(s):
+        x = pd.to_numeric(s, errors="coerce").astype("float64")
+        mx = np.nanmax(x)
+        if mx < 1e11:
+            unit = "s"
+        elif mx < 1e14:
+            unit = "ms"
+        elif mx < 1e17:
+            unit = "us"
+        else:
+            unit = "ns"
+        return pd.to_datetime(x, unit=unit, utc=True, errors="coerce").dt.tz_localize(None)
+    s = pd.to_datetime(s, utc=True, errors="coerce")
+    try:
+        return s.dt.tz_localize(None)
+    except Exception:
+        return s
 
-def _standardize_trade_cols(df: pd.DataFrame) -> pd.DataFrame:
-    """Map common alt column names to ['ts','price','qty'].""" 
-    df = df.copy()
-    # Timestamp candidates
-    if "ts" not in df:
-        for c in ["timestamp", "T", "time", "date"]:
-            if c in df:
-                df["ts"] = df[c]
-                break
-    # Price candidates
-    if "price" not in df:
-        for c in ["p", "Price", "close"]:
-            if c in df:
-                df["price"] = df[c]
-                break
-    # Qty/size candidates
-    if "qty" not in df:
-        for c in ["quantity", "q", "size", "amount"]:
-            if c in df:
-                df["qty"] = df[c]
-                break
+
+def _ensure_ts(df: pd.DataFrame) -> pd.DataFrame:
+    ts_cols = [c for c in df.columns if str(c).lower() in {"ts","timestamp","time","datetime","t"}]
+    if ts_cols:
+        df = df.rename(columns={ts_cols[0]: "ts"})
     return df
 
+
+def _rename_binance_aggtrades(df: pd.DataFrame) -> pd.DataFrame:
+    """If DataFrame looks like headerless Binance aggTrades, rename columns accordingly."""
+    cols = list(df.columns)
+    # Case 1: already named like a,p,q,f,l,T,m,M
+    if set(cols) >= {"a","p","q","f","l","T","m","M"}:
+        return df.rename(columns={"p":"price", "q":"qty", "T":"ts"})
+    # Case 2: numeric columns 0..7 -> map to a,p,q,f,l,T,m,M
+    if len(cols) == 8 and all(str(c).isdigit() for c in cols):
+        mapping = {0:"a",1:"p",2:"q",3:"f",4:"l",5:"T",6:"m",7:"M"}
+        df = df.rename(columns=mapping)
+        return df.rename(columns={"p":"price","q":"qty","T":"ts"})
+    return df
+
+
 def clean_trades(df: pd.DataFrame) -> pd.DataFrame:
+    """Basic cleaning for trades; robust to headerless Binance aggTrades.
+    
+    Ensures columns: ts (datetime), price (float), qty (float).
     """
-    Expect columns: ['ts', 'price', 'qty']
-    But will auto-map common alternatives from Binance Vision aggTrades:
-    ['timestamp','price','quantity'] -> ['ts','price','qty']
-    """
-    df = _standardize_trade_cols(df)
-    df = df.copy()
-    if "ts" not in df:
-        raise ValueError("Trades must have a 'ts' (or 'timestamp'/'T') column.")
-    df["ts"] = to_datetime(df["ts"])
+    df = _rename_binance_aggtrades(df.copy())
+    df = _ensure_ts(df)
 
-    if "price" not in df:
-        raise ValueError("Trades missing required column: price (or 'p').")
-    df["price"] = pd.to_numeric(df["price"], errors="coerce")
+    if "ts" in df.columns:
+        df["ts"] = to_datetime(df["ts"])
 
-    if "qty" not in df:
-        raise ValueError("Trades missing required column: qty (or 'quantity'/'q'/'size').")
-    df["qty"] = pd.to_numeric(df["qty"], errors="coerce")
+    if "price" not in df.columns:
+        for alt in ("p","close","last_price","Price"):
+            if alt in df.columns:
+                df = df.rename(columns={alt:"price"}); break
 
-    df = df.dropna(subset=["ts", "price", "qty"]).sort_values("ts")
-    df = df[(df["price"] > 0) & (df["qty"] > 0)]
-    df = df.drop_duplicates(subset=["ts", "price", "qty"])
-    return df.reset_index(drop=True)
+    if "qty" not in df.columns:
+        for alt in ("q","size","amount","volume","quantity","Qty"):
+            if alt in df.columns:
+                df = df.rename(columns={alt:"qty"}); break
+
+    if "price" in df.columns:
+        df["price"] = pd.to_numeric(df["price"], errors="coerce")
+    if "qty" in df.columns:
+        df["qty"] = pd.to_numeric(df["qty"], errors="coerce")
+
+    df = df.dropna(subset=["ts"]).sort_values("ts").reset_index(drop=True)
+    return df
+
 
 def clean_book(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Expect columns: ['ts', 'bid', 'ask'].
-    Accepts timestamp in s/ms/us or ISO string.
-    """
-    df = df.copy()
-    if "ts" not in df:
-        for c in ["timestamp", "T", "time", "date"]:
-            if c in df:
-                df["ts"] = df[c]
-                break
-        if "ts" not in df:
-            raise ValueError("Book must have a 'ts' column.")
-    df["ts"] = to_datetime(df["ts"])
-
-    for col in ("bid", "ask"):
-        if col not in df:
-            raise ValueError(f"Book missing required column: {col}")
-        df[col] = pd.to_numeric(df[col], errors="coerce")
-
-    df = df.dropna(subset=["ts", "bid", "ask"]).sort_values("ts")
-    df = df[(df["bid"] > 0) & (df["ask"] > 0) & (df["ask"] >= df["bid"])]
-    df = df.drop_duplicates(subset=["ts"])
-    return df.reset_index(drop=True)
+    df = _ensure_ts(df.copy())
+    if "ts" in df.columns:
+        df["ts"] = to_datetime(df["ts"])
+    df = df.dropna(subset=["ts"]).sort_values("ts").reset_index(drop=True)
+    if "bid" not in df.columns:
+        for alt in ("best_bid","b","bidPrice"):
+            if alt in df.columns: df = df.rename(columns={alt:"bid"}); break
+    if "ask" not in df.columns:
+        for alt in ("best_ask","a","askPrice"):
+            if alt in df.columns: df = df.rename(columns={alt:"ask"}); break
+    for std, alts in {"bid_size":("bsize","bidSize","best_bid_size"), "ask_size":("asize","askSize","best_ask_size")}.items():
+        if std not in df.columns:
+            for alt in alts:
+                if alt in df.columns: df = df.rename(columns={alt:std}); break
+    return df

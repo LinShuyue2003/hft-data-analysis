@@ -1,125 +1,161 @@
-# HFT Data Analysis (Crypto Tick-Level)
 
-A compact, resume-ready project that analyzes **tick-level (trade & order book)** data on crypto markets to study:
-- **Bid–ask spread distribution**
-- **Trade volume distribution**
-- **Short-horizon volatility patterns**
+# High-Frequency Trading Data Analysis
 
-It includes **data cleaning**, **distribution fitting** (AIC/BIC, KS test), and **visualizations**. You can run a **quick demo** using the bundled sample data, or download/collect live data from Binance.
+[![CI](https://github.com/LinShuyue2003/hft-data-analysis/actions/workflows/ci.yml/badge.svg)](https://github.com/LinShuyue2003/hft-data-analysis/actions)
+
+This project performs **tick-level quantitative analysis** on cryptocurrency trading data (e.g., Binance BTCUSDT).  
+It provides **data cleaning, distribution fitting, visualization, and report generation** to study microstructure patterns such as spread distribution, trade volume tails, short-term volatility, and intraday regularities.
 
 ---
 
 ## 🚀 Quick Start
 
-```bash
-# 1) Create a virtual environment (Python 3.9+ recommended)
-python -m venv .venv && source .venv/bin/activate    # (Windows) .venv\Scripts\activate
+### 1. Environment Setup
 
-# 2) Install dependencies
+```bash
+# Clone repository
+git clone https://github.com/LinShuyue2003/hft-data-analysis.git
+cd hft-data-analysis
+
+# Create virtual environment
+python -m venv .venv
+source .venv/bin/activate     # Linux/Mac
+.venv\Scripts\activate      # Windows
+
+# Install dependencies
 pip install -r requirements.txt
+```
 
-# 3) Run end-to-end demo with bundled sample data
+Dependencies include: `pandas numpy scipy matplotlib statsmodels click jinja2 pyarrow`.
+
+---
+
+### 2. Run with Sample Data
+
+```bash
 python scripts/run_all.py --use-sample
-
-open reports/summary.html   # Windows: start reports\summary.html
 ```
 
-To use **real data**, see the *Data Options* section below.
+Outputs:
+- Figures: `results/figures/*`  
+- Tables: `results/tables/*.csv`  
+- Report: `reports/summary.html`
 
 ---
 
-## 📦 Project Structure
+### 3. Download Real Data
 
-```
-hft-data-analysis/
-├─ data/
-│  ├─ raw/                 # downloaded data (Binance REST/WebSocket)
-│  └─ sample/              # small sample CSVs that work offline
-├─ src/                    # core library code
-├─ scripts/                # CLI scripts
-├─ results/                # figures + tables
-├─ reports/                # generated HTML report
-├─ requirements.txt        # dependencies
-├─ README.md               # this file
-└─ LICENSE                 # MIT
-```
-
----
-
-## 🧠 What you’ll learn / show on resume
-
-- Data cleaning and normalization for **tick-level microstructure data**
-- Modeling **spread, volume, short-horizon returns** and volatility
-- Fitting **lognormal, normal, exponential, power-law**; model selection via **AIC/BIC**, sanity via **KS test**
-- Publishing a clean, documented, **open-source** analytics project
-
----
-
-## 🧰 Data Options
-
-### Option A — Use bundled sample data (instant)
-Good for quickly running the pipeline and generating plots.
-- `data/sample/sample_trades.csv` (synthetic trades)
-- `data/sample/sample_book.csv`   (synthetic best bid/ask)
-
-### Option B — Download historical trades from Binance (REST)
-```bash
-python scripts/download_binance.py trades --symbol BTCUSDT --start "2025-08-01" --end "2025-08-01 06:00" --out data/raw/binance/BTCUSDT
-```
-This uses **/api/v3/aggTrades** and paginates. No API key needed for public endpoints.
-
-### Option C — Collect live best bid/ask for spreads (WebSocket)
-```bash
-python scripts/collect_book.py --symbol btcusdt --minutes 10 --out data/raw/binance/BTCUSDT
-```
-This listens to `wss://stream.binance.com:9443/ws/<symbol>@bookTicker` and stores timestamped bid/ask snapshots.
-
-> **Note**: Binance spot API is rate-limited and live book snapshots are best-effort. For historical *book* data, use a third-party dataset (e.g., CryptoTick) and place CSVs under `data/raw/` with columns: `ts, bid, ask` (UTC ISO or epoch ms).
-
----
-
-## 🔬 Analyses
-
-- **Spread distribution**: histogram, empirical CDF, fitted distributions
-- **Volume distribution**: single-trade and 1s/5s aggregation
-- **Short-horizon returns & volatility**: log returns on mid-price; rolling sigma
-
-Key outputs go to `results/figures` and `results/tables` and are embedded into `reports/summary.html`.
-
----
-
-## 🧪 Run individual steps
+#### Automatic Download (requires Binance API access)
 
 ```bash
-# Clean and prepare data
-python scripts/prepare_data.py --use-sample
+# Download trades for one day
+python -m scripts.download_binance trades --symbol BTCUSDT --date 2025-08-01 --out data/raw/binance/BTCUSDT
 
-# Generate figures + tables
-python scripts/run_all.py --use-sample
+# Download top-of-book snapshots (WebSocket collection for 30–60 minutes)
+python -m scripts.collect_book --symbol BTCUSDT --out data/raw/binance/BTCUSDT/book.csv
+```
 
-# Distribution fits only
-python scripts/run_all.py --use-sample --fits-only
+#### If You Can Only Get Trades (no book data)
+
+Use the simulator to create synthetic book data:
+
+```bash
+python -m scripts.convert_trades_to_book --trades data/raw/binance/BTCUSDT/BTCUSDT-aggTrades-2025-08-01.csv --out data/raw/binance/BTCUSDT/book.csv
+```
+
+This produces a pseudo-book file that can be used for spread analysis.
+
+#### In Restricted Regions (US/China)
+
+If Binance API is not accessible, you need to manually download:  
+- **Trade file**: `BTCUSDT-aggTrades-YYYY-MM-DD.csv`  
+- **Book file**: `book.csv` (or generated via `simulate_book.py`)  
+
+Then place them in:  
+```
+data/raw/binance/BTCUSDT/
+ ├── BTCUSDT-aggTrades-YYYY-MM-DD.csv
+ └── book.csv
 ```
 
 ---
 
-## 🖼️ Example Figures (after running)
-- `spread_hist.png`: Bid–ask spread histogram
-- `volume_hist.png`: Trade volume histogram
-- `returns_hist.png`: Short-horizon returns histogram
-- `volatility_timeseries.png`: Rolling volatility
+### 4. Data Cleaning
+
+Data cleaning is automatically handled inside `run_all.py`.  
+It supports three cases:
+
+1. Only `--trades` provided → cleans trades.  
+2. Only `--book` provided → cleans book snapshots.  
+3. Both provided → merges trades and book data.  
+
+You can also run cleaning standalone:
+
+```bash
+python -m scripts.prepare_data --trades data/raw/binance/BTCUSDT/BTCUSDT-aggTrades-2025-08-01.csv --book data/raw/binance/BTCUSDT/book.csv
+```
+
+Outputs:
+```
+data/processed/trades.parquet
+data/processed/book.parquet
+```
 
 ---
 
-## 📊 Reproducibility
+### 5. Generate Report
 
-- All scripts are deterministic given the same CSV inputs.
-- Use `--seed` to control randomness where applicable.
+#### From raw CSV (auto-clean inside pipeline)
+
+```bash
+python scripts/run_all.py --trades data/raw/binance/BTCUSDT/BTCUSDT-aggTrades-2025-08-01.csv --book data/raw/binance/BTCUSDT/book.csv --bar 1s --symbol BTCUSDT
+```
+
+#### From cleaned Parquet
+
+```bash
+python scripts/run_all.py --trades data/processed/trades.parquet --book data/processed/book.parquet --bar 1s --symbol BTCUSDT 
+```
+
+Generates: `reports/summary.html`
 
 ---
 
-## 📄 License
+## 📂 Project Structure
 
-This project is licensed under the MIT License. See `LICENSE` for details.
+```
+├── scripts/
+│   ├── run_all.py          # Main pipeline: clean → features → fit → visualize → report
+│   ├── download_binance.py # Download trades
+│   ├── collect_book.py     # Collect book snapshots
+│   ├── convert_trades_to_book.py    # Generate pseudo-book from trades (for users without book data)
+│   └── prepare_data.py       # Standalone cleaning
+├── src/
+│   ├── data_cleaning.py    # Cleaning functions
+│   ├── features.py         # Feature engineering
+│   ├── fit.py              # Distribution fitting
+│   ├── viz.py              # Visualization
+│   ├── report.py           # Report generation
+│   └── tests/              # Unit tests
+├── data/
+│   ├── sample/             # Sample data
+│   ├── raw/                # Raw data (csv)
+│   └── processed/          # Cleaned data (parquet)
+├── results/                # Figures & tables
+├── reports/                # HTML reports
+├── requirements.txt
+└── README.md
+```
 
 ---
+
+## 📜 License
+
+This project is released under the [MIT License](LICENSE).
+
+---
+
+## 📈 Changelog
+
+See [CHANGELOG.md](CHANGELOG.md) for version history.
+

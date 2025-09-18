@@ -1,0 +1,61 @@
+
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>{{ title or "HFT Report" }}</title>
+  <style>
+    body { font-family: -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; margin: 24px; }
+    h1 { margin-bottom: 0; }
+    .muted { color: #666; font-size: 0.9em; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(400px, 1fr)); gap: 16px; }
+    .card { border: 1px solid #eee; border-radius: 12px; padding: 12px; box-shadow: 0 1px 6px rgba(0,0,0,0.06);}
+    .caption { color: #666; font-size: 0.9em; }
+    table { border-collapse: collapse; width: 100%; }
+    th, td { border: 1px solid #ddd; padding: 6px; text-align: right; }
+    th { background:#fafafa; text-align: left; }
+    table.stats {
+      table-layout: auto;
+      word-break: break-word;
+      font-size: 12px;
+    }
+    table.stats th, table.stats td {
+      padding: 4px 6px;
+    }
+  </style>
+</head>
+<body>
+  <h1>{{ title or "HFT Report" }}</h1>
+  <div class="muted">Generated at {{ generated_at }} · Symbol {{ symbol }} · Bar {{ bar }}</div>
+
+  <h2>Key Figures</h2>
+  <div class="grid">
+    {% for fig in figures %}
+      <div class="card">
+        <h3>{{ fig.title }}</h3>
+        <img src="{{ fig.path }}" style="max-width:100%"/>
+        <p class="caption">{{ fig.caption }}</p>
+      </div>
+    {% endfor %}
+  </div>
+
+  <h2>Statistics</h2>
+  <div class="grid">
+    {% for tb in stats_tables %}
+      <div class="card">
+        <h3>{{ tb.name }}</h3>
+        {{ tb.table | safe }}
+      </div>
+    {% endfor %}
+  </div>
+
+  {% if notes %}
+  <h2>Notes</h2>
+  <ul>
+    {% for n in notes %}
+      <li>{{ n }}</li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+</body>
+</html>

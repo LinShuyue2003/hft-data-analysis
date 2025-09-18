@@ -1,0 +1,13 @@
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hft-data-analysis"
+version = "0.1.0"
+description = "High-frequency trading data analysis toolkit"
+authors = [{name="Author"}]
+dependencies = ["pandas","numpy","scipy","matplotlib","click"]
+
+[tool.setuptools.packages.find]
+where = ["src"]

@@ -1,47 +1,29 @@
-"""
-Collects best bid/ask via Binance WebSocket and writes CSV rows.
-"""
-from __future__ import annotations
-import json
-import time
-from datetime import datetime, timezone
-import pathlib
-import click
-from websocket import create_connection
-import pandas as pd
 
-@click.command()
-@click.option("--symbol", required=True, help="e.g., btcusdt")
-@click.option("--minutes", default=5, show_default=True, type=int)
-@click.option("--out", default="data/raw/binance/BTCUSDT", show_default=True)
-def main(symbol: str, minutes: int, out: str):
-    symbol = symbol.lower()
-    url = f"wss://stream.binance.com:9443/ws/{symbol}@bookTicker"
-    ws = create_connection(url, timeout=5)
-    end_time = time.time() + minutes * 60
-    out = pathlib.Path(out)
-    out.mkdir(parents=True, exist_ok=True)
-    out_file = out / f"{symbol}_book_{datetime.utcnow().strftime('%Y%m%dT%H%M%SZ')}.csv"
-    with open(out_file, "w") as f:
-        f.write("ts,bid,ask\n")
-        while time.time() < end_time:
-            try:
-                msg = json.loads(ws.recv())
-                # event time in ms
-                ts = msg.get("E", int(time.time()*1000))
-                bid = float(msg["b"])
-                ask = float(msg["a"])
-                f.write(f"{ts},{bid},{ask}\n")
-            except Exception:
-                # reconnect
-                try:
-                    ws.close()
-                except Exception:
-                    pass
-                time.sleep(1)
-                ws = create_connection(url, timeout=5)
-    ws.close()
-    print(f"Wrote {out_file}")
+import json, time, gzip, sys
+import websocket
 
-if __name__ == "__main__":
-    main()
+"""
+Minimal WebSocket collector with heartbeat and simple reconnect.
+"""
+
+def run_ws(url, out_path, ping_interval=15):
+    """Connect to WS, write lines to file with periodic heartbeats."""
+    def on_message(ws, message):
+        with open(out_path, 'a', encoding='utf-8') as f:
+            f.write(message.strip() + '\n')
+
+    def on_error(ws, error):
+        print("[WS] error:", error, file=sys.stderr)
+
+    def on_close(ws, close_status_code, close_msg):
+        print("[WS] closed", close_status_code, close_msg)
+
+    ws = websocket.WebSocketApp(url, on_message=on_message, on_error=on_error, on_close=on_close)
+    while True:
+        try:
+            ws.run_forever(ping_interval=ping_interval, ping_timeout=10)
+        except Exception as e:
+            print("[WS] reconnect after error:", e, file=sys.stderr)
+            time.sleep(3)
+        else:
+            break

@@ -1,66 +1,54 @@
+
 """
-Binance REST downloader (historical aggregated trades) and helpers.
+Binance REST downloader with retry/backoff for aggregated trades.
 """
 from __future__ import annotations
-import time
-import math
-import json
-import pathlib
-from datetime import datetime, timezone
-from typing import Optional, List
-import requests
+import time, math, json, pathlib, sys
 import pandas as pd
+import requests
+from typing import Optional
 
-BASE = "https://api.binance.com"
+BASE = "https://api.binance.com/api/v3/aggTrades"
 
-def _to_ms(dt_str: str) -> int:
-    dt = pd.to_datetime(dt_str, utc=True)
-    return int(dt.timestamp() * 1000)
+def _sleep_backoff(attempt: int):
+    time.sleep(min(60, 2 ** attempt))
 
-def download_agg_trades(symbol: str, start: str, end: str, out_dir: str, limit: int = 1000) -> str:
-    """
-    Downloads aggregated trades between [start, end] into a CSV.
-    Returns the output file path.
-    """
-    s_ms, e_ms = _to_ms(start), _to_ms(end)
-    symbol = symbol.upper()
-    out_dir = pathlib.Path(out_dir)
-    out_dir.mkdir(parents=True, exist_ok=True)
-    rows = []
-
-    last_id: Optional[int] = None
+def _fetch(symbol: str, start_ms: int, end_ms: int, limit: int = 1000, session: Optional[requests.Session] = None):
+    """Fetch a page from aggTrades with retries and 429 handling."""
+    url = BASE
+    ses = session or requests.Session()
+    params = {"symbol": symbol.upper(), "startTime": start_ms, "endTime": end_ms, "limit": limit}
+    attempt = 0
     while True:
-        params = {"symbol": symbol, "limit": limit}
-        if last_id is not None:
-            params["fromId"] = last_id + 1
-        else:
-            params.update({"startTime": s_ms, "endTime": min(e_ms, s_ms + 60*60*1000)})  # 1h chunks
+        try:
+            r = ses.get(url, params=params, timeout=15)
+            if r.status_code == 429:
+                _sleep_backoff(attempt); attempt += 1; continue
+            if r.status_code >= 500:
+                _sleep_backoff(attempt); attempt += 1; continue
+            r.raise_for_status()
+            data = r.json()
+            return data
+        except Exception:
+            if attempt >= 6:
+                raise
+            _sleep_backoff(attempt); attempt += 1
 
-        r = requests.get(f"{BASE}/api/v3/aggTrades", params=params, timeout=20)
-        r.raise_for_status()
-        data = r.json()
-        if not data:
-            break
-        for d in data:
-            ts = d["T"]  # ms
-            if ts < s_ms or ts > e_ms:
-                continue
+def download_agg_trades(symbol: str, start_ms: int, end_ms: int, out_csv: str):
+    ses = requests.Session()
+    cur = start_ms
+    rows = []
+    while cur < end_ms:
+        batch = _fetch(symbol, cur, min(cur + 60_000, end_ms), session=ses)
+        if not batch:
+            cur += 60_000; continue
+        for it in batch:
             rows.append({
-                "ts": ts,
-                "price": float(d["p"]),
-                "qty": float(d["q"]),
-                "is_maker": bool(d["m"]),
-                "first_id": d["a"],
+                "T": it.get("T"), "p": float(it.get("p")), "q": float(it.get("q"))
             })
-        last_id = data[-1]["a"]
-        # Respect rate limits
-        time.sleep(0.2)
-
-        # Stop if we passed end
-        if rows and rows[-1]["ts"] >= e_ms:
-            break
-
-    df = pd.DataFrame(rows)
-    out_file = out_dir / f"{symbol}_aggTrades_{start.replace(' ', '_')}_{end.replace(' ', '_')}.csv"
-    df.to_csv(out_file, index=False)
-    return str(out_file)
+            cur = max(cur, it.get("T")+1)
+        time.sleep(0.1)
+    df = pd.DataFrame(rows).rename(columns={"T":"ts","p":"price","q":"qty"})
+    pathlib.Path(out_csv).parent.mkdir(parents=True, exist_ok=True)
+    df.to_csv(out_csv, index=False)
+    return out_csv

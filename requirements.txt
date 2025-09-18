@@ -1,17 +1,9 @@
-# Core
-numpy>=1.24
-pandas>=2.0
-scipy>=1.10
-statsmodels>=0.14
 
-# Viz
-matplotlib>=3.7
-plotly>=5.20
-
-# IO + CLI
-pyarrow>=15.0
-requests>=2.31
-tqdm>=4.66
-click>=8.1
-websocket-client>=1.7
-jinja2>=3.1
+pandas
+numpy
+scipy
+matplotlib
+click
+statsmodels
+jinja2
+pyarrow
