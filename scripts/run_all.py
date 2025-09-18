@@ -48,7 +48,8 @@ def _read_any(path: str) -> pd.DataFrame:
 @click.option("--bar", default="1s", show_default=True, help="Bar interval, e.g. 1s, 100ms, 1min." )
 @click.option("--symbol", default="BTCUSDT", show_default=True, help="Symbol label for report/figures." )
 @click.option("--use-sample", is_flag=True, help="Use bundled sample data without specifying --trades/--book.")
-def main(trades: str, book: str, bar: str, symbol: str, use_sample: bool):
+@click.option("--fits-only", is_flag=True, help="Run only distribution fitting, skip figures and report.")
+def main(trades: str, book: str, bar: str, symbol: str, use_sample: bool, fits_only: bool):
     """Run the full analysis pipeline: clean → features → fit → visualize → HTML report."""
     results_dir = os.path.join(PROJECT_ROOT, "results")
     figs_dir = os.path.join(results_dir, "figures"); os.makedirs(figs_dir, exist_ok=True)
@@ -129,7 +130,11 @@ def main(trades: str, book: str, bar: str, symbol: str, use_sample: bool):
         cand = select_candidates_for_variable("absret")
         df_fit = fit_candidates(bars["absret"].values, cand, positive_only=True)
         fit_tables["absret_fit"] = _save_table(df_fit, "absret_fit")
-
+        
+    if fits_only:
+        print("[OK] Fits completed (CI mode).")
+        return
+    
     # === Figures ===
     figs = []
 
