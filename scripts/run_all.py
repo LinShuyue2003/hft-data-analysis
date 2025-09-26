@@ -86,7 +86,16 @@ def main(trades: str, book: str, bar: str, symbol: str, use_sample: bool, fits_o
     bars["vol_roll"] = rolling_vol(bars, col="logret", window=60, min_periods=20)
     if bdf is not None and {"mid","spread_bp"}.issubset(bdf.columns):
         bars = merge_trade_book(bars, bdf)
-
+        
+    # --- Export bars for quick_metrics (make sure index -> 'ts') ---
+    bars_out = os.path.join(results_dir, "bars.parquet")
+    idx_name = bars.index.name or "ts"
+    bars_reset = bars.reset_index()
+    if idx_name != "ts":
+        bars_reset = bars_reset.rename(columns={idx_name: "ts"})
+    bars_reset.to_parquet(bars_out, index=False)
+    bars_reset.to_csv(os.path.join(results_dir, "bars.csv"), index=False)
+    
     # === Fitting per variable ===
     # volume from trades (tick size) and from bars (vol): both are useful; we'll use trades qty
     fit_tables = {}
